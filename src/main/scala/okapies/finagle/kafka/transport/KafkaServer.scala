@@ -46,27 +46,8 @@ object ValueDecoder {
   implicit val param = Stack.Param(ValueDecoder(new DefaultDecoder))
 }
 
-
-case class KeyEncoder(encoder:Class[_ <: Encoder[_]]) {
-  def mk(): (KeyEncoder, Stack.Param[KeyEncoder]) =
-    (this, KeyEncoder.param)
-}
-
-object KeyEncoder {
-  implicit val param = Stack.Param(KeyEncoder(classOf[DefaultEncoder]))
-}
-
-case class ValueEncoder(encoder:Class[_ <: Encoder[_]]) {
-  def mk(): (ValueEncoder, Stack.Param[ValueEncoder]) =
-    (this, ValueEncoder.param)
-}
-
-object ValueEncoder {
-  implicit val param = Stack.Param(ValueEncoder(classOf[DefaultEncoder]))
-}
-
 case class KafkaServer[K,V](stack: Stack[ServiceFactory[MessageAndMetadata[K,V], Any]] = StackServer.newStack[MessageAndMetadata[K,V], Any],
-                       params: Params = StackServer.defaultParams + Config(new Properties) + KeyDecoder(new DefaultDecoder) + ValueDecoder(new DefaultDecoder))
+                       params: Params = StackServer.defaultParams + Config.param.default + KeyDecoder.param.default + ValueDecoder.param.default)
   extends StdStackServer[MessageAndMetadata[K,V],Any,KafkaServer[K,V]] {
   override type In = Any
   override type Out = MessageAndMetadata[K,V]
