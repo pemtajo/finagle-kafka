@@ -14,7 +14,9 @@ import com.twitter.util.{Closable, Future}
 import kafka.consumer.{Consumer, ConsumerConfig, ConsumerConnector}
 import kafka.message.MessageAndMetadata
 import kafka.producer.{KeyedMessage, Producer, ProducerConfig}
-import kafka.serializer.{Decoder, DefaultDecoder, StringDecoder}
+import kafka.serializer._
+
+import scala.reflect.ClassTag
 
 
 case class Config(prop:Properties) {
@@ -45,6 +47,23 @@ object ValueDecoder {
 }
 
 
+case class KeyEncoder(encoder:Class[_ <: Encoder[_]]) {
+  def mk(): (KeyEncoder, Stack.Param[KeyEncoder]) =
+    (this, KeyEncoder.param)
+}
+
+object KeyEncoder {
+  implicit val param = Stack.Param(KeyEncoder(classOf[DefaultEncoder]))
+}
+
+case class ValueEncoder(encoder:Class[_ <: Encoder[_]]) {
+  def mk(): (ValueEncoder, Stack.Param[ValueEncoder]) =
+    (this, ValueEncoder.param)
+}
+
+object ValueEncoder {
+  implicit val param = Stack.Param(ValueEncoder(classOf[DefaultEncoder]))
+}
 
 case class KafkaServer[K,V](stack: Stack[ServiceFactory[MessageAndMetadata[K,V], Any]] = StackServer.newStack[MessageAndMetadata[K,V], Any],
                        params: Params = StackServer.defaultParams + Config(new Properties) + KeyDecoder(new DefaultDecoder) + ValueDecoder(new DefaultDecoder))
@@ -91,45 +110,54 @@ case class KafkaServer[K,V](stack: Stack[ServiceFactory[MessageAndMetadata[K,V],
   }
 }
 
-case class KafkaClient(stack: Stack[ServiceFactory[KeyedMessage[String, Array[Byte]], Unit]] = StackClient.newStack[KeyedMessage[String, Array[Byte]], Unit],
-                       params: Params = StackClient.defaultParams + Config(new Properties)) extends StdStackClient[KeyedMessage[String,Array[Byte]], Unit, KafkaClient] {
-  override type In = KeyedMessage[String, Array[Byte]]
+case class KafkaClient[K,V](stack: Stack[ServiceFactory[KeyedMessage[K,V], Unit]] = StackClient.newStack[KeyedMessage[K,V], Unit],
+                       params: Params = StackClient.defaultParams + Config(new Properties))
+  extends StdStackClient[KeyedMessage[K,V], Unit, KafkaClient[K,V]] {
+  override type In = KeyedMessage[K,V]
   override type Out = Unit
 
-  override protected def copy1(stack: Stack[ServiceFactory[KeyedMessage[String, Array[Byte]], Unit]] = this.stack,
-                               params: Params = this.params): KafkaClient =
+  override protected def copy1(stack: Stack[ServiceFactory[KeyedMessage[K,V], Unit]] = this.stack,
+                               params: Params = this.params): KafkaClient[K,V] =
     copy(stack, params)
 
-  override protected def newDispatcher(transport: Transport[In, Out]): Service[KeyedMessage[String, Array[Byte]], Unit] = {
+  override protected def newDispatcher(transport: Transport[In, Out]): Service[KeyedMessage[K,V], Unit] = {
     val param.Stats(receiver) = params[param.Stats]
     new SerialClientDispatcher(transport, receiver)
   }
 
   override protected def newTransporter(): Transporter[In, Out] = new Transporter[In,Out] {
-    override def apply(addr: SocketAddress): Future[Transport[KeyedMessage[String, Array[Byte]], Unit]] = {
+    override def apply(addr: SocketAddress): Future[Transport[KeyedMessage[K,V], Unit]] = {
       val Config(props) = params[Config]
       addr match {
         case a:InetSocketAddress =>
           props.setProperty("metadata.broker.list", s"${a.getHostName}:${a.getPort}")
       }
       Future {
-        val producer:Producer[String,Array[Byte]] = new Producer(new ProducerConfig(props))
+        val producer:Producer[K,V] = new Producer(new ProducerConfig(props))
         new KafkaProducer(producer)
       }
     }
   }
 
-  def withProperties(props: Map[String, String]): KafkaClient = {
+  def withProperties(props: Map[String, String]): KafkaClient[K,V] = {
     val Config(properties) = params[Config]
     props.foreach { case (k,v) =>  properties.setProperty(k,v)}
     this
+  }
+
+  def withKeyEncoder[NK](encoder:Class[_ <: Encoder[NK]]): KafkaClient[NK,V] = {
+    withProperties(Map("key.serializer.class" -> encoder.getCanonicalName)).asInstanceOf[KafkaClient[NK,V]]
+  }
+
+  def withValueEncoder[NV](encoder:Class[_ <: Encoder[NV]]): KafkaClient[K,NV] = {
+    withProperties(Map("serializer.class" -> encoder.getCanonicalName)).asInstanceOf[KafkaClient[K,NV]]
   }
 }
 
 object KafkaServer {
   def server = KafkaServer()
 
-  def client = ClientBuilder().stack(KafkaClient())
+  def client = ClientBuilder().stack(KafkaClient().withKeyEncoder(classOf[StringEncoder]).withValueEncoder(classOf[StringEncoder]))
       .hosts("localhost:9092")
     .name("client")
     .build()

@@ -9,8 +9,8 @@ import com.twitter.util.{Future, Promise, Time}
 import kafka.producer.Producer
 import kafka.producer.KeyedMessage
 
-class KafkaProducer(producer: Producer[String,Array[Byte]])
- extends Transport[KeyedMessage[String,Array[Byte]], Unit] {
+class KafkaProducer[K,V](producer: Producer[K,V])
+ extends Transport[KeyedMessage[K,V], Unit] {
 
   override def remoteAddress: SocketAddress = new InetSocketAddress(0)
 
@@ -24,7 +24,7 @@ class KafkaProducer(producer: Producer[String,Array[Byte]])
 
   override def close(deadline: Time): Future[Unit] = Future(producer.close)
 
-  override def write(req: KeyedMessage[String,Array[Byte]]): Future[Unit] = Future(producer.send(req))
+  override def write(req: KeyedMessage[K,V]): Future[Unit] = Future(producer.send(req))
 
   override def read(): Future[Unit] = Future(())
 }
