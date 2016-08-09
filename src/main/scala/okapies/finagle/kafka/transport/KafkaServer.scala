@@ -15,18 +15,25 @@ import kafka.consumer.{Consumer, ConsumerConfig, ConsumerConnector}
 import kafka.message.MessageAndMetadata
 import kafka.producer.{KeyedMessage, Producer, ProducerConfig}
 
-/**
-  * Created by lucascs on 8/9/16.
-  */
+
+case class Config(prop:Properties) {
+  def mk(): (Config, Stack.Param[Config]) =
+    (this, Config.param)
+}
+
+object Config {
+  implicit val param = Stack.Param(Config(new Properties()))
+}
+
 case class KafkaServer(stack: Stack[ServiceFactory[MessageAndMetadata[String,String], Any]] = StackServer.newStack[MessageAndMetadata[String,String], Any],
-                       params: Params = StackServer.defaultParams) extends StdStackServer[MessageAndMetadata[String,String],Any,KafkaServer] {
+                       params: Params = StackServer.defaultParams + Config(new Properties)) extends StdStackServer[MessageAndMetadata[String,String],Any,KafkaServer] {
   type Rep = MessageAndMetadata[String,String]
   type Req = Any
   override type In = Req
 
   override protected def newListener(): Listener[In, Out] = new Listener[In,Out] {
     override def listen(addr: SocketAddress)(serveTransport: (Transport[In, Out]) => Unit): ListeningServer = {
-      val props: Properties = new Properties()
+      val Config(props) = params[Config]
       props.setProperty("zookeeper.connect", addr match {
         case a:InetSocketAddress => s"${a.getHostName}:${a.getPort}"
       })
@@ -46,7 +53,7 @@ case class KafkaServer(stack: Stack[ServiceFactory[MessageAndMetadata[String,Str
 }
 
 case class KafkaClient(stack: Stack[ServiceFactory[KeyedMessage[String, Array[Byte]], Unit]] = StackClient.newStack[KeyedMessage[String, Array[Byte]], Unit],
-                       params: Params = StackClient.defaultParams) extends StdStackClient[KeyedMessage[String,Array[Byte]], Unit, KafkaClient] {
+                       params: Params = StackClient.defaultParams + Config(new Properties)) extends StdStackClient[KeyedMessage[String,Array[Byte]], Unit, KafkaClient] {
   override type In = KeyedMessage[String, Array[Byte]]
 
   override protected def copy1(stack: Stack[ServiceFactory[KeyedMessage[String, Array[Byte]], Unit]] = this.stack,
@@ -60,17 +67,16 @@ case class KafkaClient(stack: Stack[ServiceFactory[KeyedMessage[String, Array[By
 
   override protected def newTransporter(): Transporter[In, Out] = new Transporter[In,Out] {
     override def apply(addr: SocketAddress): Future[Transport[KeyedMessage[String, Array[Byte]], Unit]] = {
-      val props:Properties = new Properties()
+      val Config(props) = params[Config]
       addr match {
         case a:InetSocketAddress =>
-          println(s"hoho $a")
           props.setProperty("metadata.broker.list", s"${a.getHostName}:${a.getPort}")
           props.setProperty("serializer.class",         "kafka.serializer.DefaultEncoder")
-           props.setProperty("key.serializer.class",     "kafka.serializer.StringEncoder")
-           props.setProperty("partitioner.class",        "kafka.producer.DefaultPartitioner")
-           props.setProperty("request.required.acks",    "1")
-           props.setProperty("message.send.max.retries", "5")
-           props.setProperty("retry.backoff.ms",         "500")
+          props.setProperty("key.serializer.class",     "kafka.serializer.StringEncoder")
+          props.setProperty("partitioner.class",        "kafka.producer.DefaultPartitioner")
+          props.setProperty("request.required.acks",    "1")
+          props.setProperty("message.send.max.retries", "5")
+          props.setProperty("retry.backoff.ms",         "500")
       }
       Future {
         val producer:Producer[String,Array[Byte]] = new Producer(new ProducerConfig(props))
@@ -87,12 +93,12 @@ object KafkaServer {
 
   def client = ClientBuilder().stack(KafkaClient())
       .hosts("localhost:9092")
-    .name("Daora")
+    .name("client")
     .build()
 
   def builder = ServerBuilder()
     .stack(server)
-    .name("Zoado")
+    .name("server")
       .bindTo(new InetSocketAddress("localhost", 2181))
     .build(Service.mk[MessageAndMetadata[String,String], Any](x => Future(println(x))))
 }
