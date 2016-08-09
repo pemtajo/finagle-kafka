@@ -27,9 +27,8 @@ object Config {
 
 case class KafkaServer(stack: Stack[ServiceFactory[MessageAndMetadata[String,String], Any]] = StackServer.newStack[MessageAndMetadata[String,String], Any],
                        params: Params = StackServer.defaultParams + Config(new Properties)) extends StdStackServer[MessageAndMetadata[String,String],Any,KafkaServer] {
-  type Rep = MessageAndMetadata[String,String]
-  type Req = Any
-  override type In = Req
+  override type In = Any
+  override type Out = MessageAndMetadata[String,String]
 
   override protected def newListener(): Listener[In, Out] = new Listener[In,Out] {
     override def listen(addr: SocketAddress)(serveTransport: (Transport[In, Out]) => Unit): ListeningServer = {
@@ -37,24 +36,33 @@ case class KafkaServer(stack: Stack[ServiceFactory[MessageAndMetadata[String,Str
       props.setProperty("zookeeper.connect", addr match {
         case a:InetSocketAddress => s"${a.getHostName}:${a.getPort}"
       })
-      props.setProperty("group.id", "ZUEIRO")
       val consumer: ConsumerConnector = Consumer.create(new ConsumerConfig(props))
       serveTransport(new KafkaConsumer(consumer, "ZUEIRA"))
       NullServer
     }
   }
 
-  override protected def newDispatcher(transport: Transport[In, Out], service: Service[Rep, Any]): Closable =
+  override protected def newDispatcher(transport: Transport[In, Out], service: Service[MessageAndMetadata[String,String], Any]): Closable =
     new SerialServerDispatcher(transport, service)
 
-  override type Out = Rep
-
   override protected def copy1(stack: Stack[ServiceFactory[MessageAndMetadata[String, String], Any]] = this.stack, params: Params = this.params): KafkaServer = copy(stack, params)
+
+  def withProperties(props: Map[String, String]): KafkaServer = {
+    val Config(properties) = params[Config]
+    props.foreach { case (k,v) =>  properties.setProperty(k,v)}
+    this
+  }
+
+  def withGroup(group: String): KafkaServer = {
+    params[Config].prop.setProperty("group.id", group)
+    this
+  }
 }
 
 case class KafkaClient(stack: Stack[ServiceFactory[KeyedMessage[String, Array[Byte]], Unit]] = StackClient.newStack[KeyedMessage[String, Array[Byte]], Unit],
                        params: Params = StackClient.defaultParams + Config(new Properties)) extends StdStackClient[KeyedMessage[String,Array[Byte]], Unit, KafkaClient] {
   override type In = KeyedMessage[String, Array[Byte]]
+  override type Out = Unit
 
   override protected def copy1(stack: Stack[ServiceFactory[KeyedMessage[String, Array[Byte]], Unit]] = this.stack,
                                params: Params = this.params): KafkaClient =
@@ -71,12 +79,6 @@ case class KafkaClient(stack: Stack[ServiceFactory[KeyedMessage[String, Array[By
       addr match {
         case a:InetSocketAddress =>
           props.setProperty("metadata.broker.list", s"${a.getHostName}:${a.getPort}")
-          props.setProperty("serializer.class",         "kafka.serializer.DefaultEncoder")
-          props.setProperty("key.serializer.class",     "kafka.serializer.StringEncoder")
-          props.setProperty("partitioner.class",        "kafka.producer.DefaultPartitioner")
-          props.setProperty("request.required.acks",    "1")
-          props.setProperty("message.send.max.retries", "5")
-          props.setProperty("retry.backoff.ms",         "500")
       }
       Future {
         val producer:Producer[String,Array[Byte]] = new Producer(new ProducerConfig(props))
@@ -85,7 +87,11 @@ case class KafkaClient(stack: Stack[ServiceFactory[KeyedMessage[String, Array[By
     }
   }
 
-  override type Out = Unit
+  def withProperties(props: Map[String, String]): KafkaClient = {
+    val Config(properties) = params[Config]
+    props.foreach { case (k,v) =>  properties.setProperty(k,v)}
+    this
+  }
 }
 
 object KafkaServer {
