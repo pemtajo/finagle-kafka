@@ -16,9 +16,6 @@ import kafka.message.MessageAndMetadata
 import kafka.producer.{KeyedMessage, Producer, ProducerConfig}
 import kafka.serializer._
 
-import scala.reflect.ClassTag
-
-
 case class Config(prop:Properties) {
   def mk(): (Config, Stack.Param[Config]) =
     (this, Config.param)
@@ -26,6 +23,15 @@ case class Config(prop:Properties) {
 
 object Config {
   implicit val param = Stack.Param(Config(new Properties()))
+}
+
+case class Topic(topic:Option[String]) {
+  def mk(): (Topic, Stack.Param[Topic]) =
+    (this, Topic.param)
+}
+
+object Topic {
+  implicit val param = Stack.Param(Topic(None))
 }
 
 case class KeyDecoder(decoder:Decoder[_]) {
@@ -47,7 +53,12 @@ object ValueDecoder {
 }
 
 case class KafkaServer[K,V](stack: Stack[ServiceFactory[MessageAndMetadata[K,V], Any]] = StackServer.newStack[MessageAndMetadata[K,V], Any],
-                       params: Params = StackServer.defaultParams + Config.param.default + KeyDecoder.param.default + ValueDecoder.param.default)
+                       params: Params =
+                       StackServer.defaultParams
+                         + Config.param.default
+                         + KeyDecoder.param.default
+                         + ValueDecoder.param.default
+                         + Topic.param.default)
   extends StdStackServer[MessageAndMetadata[K,V],Any,KafkaServer[K,V]] {
   override type In = Any
   override type Out = MessageAndMetadata[K,V]
@@ -57,12 +68,18 @@ case class KafkaServer[K,V](stack: Stack[ServiceFactory[MessageAndMetadata[K,V],
       val Config(props) = params[Config]
       val KeyDecoder(keyDecoder:Decoder[K]) = params[KeyDecoder]
       val ValueDecoder(valueDecoder:Decoder[V]) = params[ValueDecoder]
-      props.setProperty("zookeeper.connect", addr match {
-        case a:InetSocketAddress => s"${a.getHostName}:${a.getPort}"
-      })
-      val consumer: ConsumerConnector = Consumer.create(new ConsumerConfig(props))
-      serveTransport(new KafkaConsumer(consumer, "ZUEIRA", keyDecoder, valueDecoder))
-      NullServer
+      val Topic(topic) = params[Topic]
+      topic match {
+        case Some(topicName) =>
+          props.setProperty("zookeeper.connect", addr match {
+            case a:InetSocketAddress => s"${a.getHostName}:${a.getPort}"
+          })
+          val consumer: ConsumerConnector = Consumer.create(new ConsumerConfig(props))
+          serveTransport(new KafkaConsumer(consumer, topicName, keyDecoder, valueDecoder))
+          NullServer
+        case None => throw new IllegalArgumentException("Topic config is required")
+      }
+
     }
   }
 
@@ -85,9 +102,9 @@ case class KafkaServer[K,V](stack: Stack[ServiceFactory[MessageAndMetadata[K,V],
     configured(ValueDecoder(decoder)).asInstanceOf[KafkaServer[K,NV]]
   }
 
-  def withGroup(group: String): KafkaServer[K,V] = {
+  def withGroup(group: String, topic: String): KafkaServer[K,V] = {
     params[Config].prop.setProperty("group.id", group)
-    this
+    configured(Topic(Some(topic)))
   }
 }
 
@@ -144,7 +161,7 @@ object KafkaServer {
     .build()
 
   def builder = ServerBuilder()
-    .stack(KafkaServer().withGroup("DOUGH").withKeyDecoder(new StringDecoder).withValueDecoder(new StringDecoder))
+    .stack(KafkaServer().withGroup("GRUPO", "ZUEIRA").withKeyDecoder(new StringDecoder).withValueDecoder(new StringDecoder))
     .name("server")
       .bindTo(new InetSocketAddress("localhost", 2181))
     .build(Service.mk[MessageAndMetadata[String,String], Any](x => Future(println(x.key -> x.message))))

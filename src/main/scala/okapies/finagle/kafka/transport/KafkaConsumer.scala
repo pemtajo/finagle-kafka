@@ -1,6 +1,7 @@
 package okapies.finagle.kafka.transport
 
 import java.net.{InetSocketAddress, SocketAddress}
+import java.nio.channels.ClosedChannelException
 import java.security.cert.Certificate
 import java.util.concurrent.Executors
 
@@ -14,7 +15,8 @@ import kafka.serializer.Decoder
 
 class KafkaConsumer[K,V](consumer: ConsumerConnector, topic: String, keyDecoder: Decoder[K], valueDecoder: Decoder[V])
  extends Transport[Any, MessageAndMetadata[K,V]] {
-  val futurePool = FuturePool(Executors.newFixedThreadPool(1))
+  val threadPool = Executors.newSingleThreadExecutor()
+  val futurePool = FuturePool(threadPool)
 
   val msgs: KafkaStream[K,V] = consumer.createMessageStreams(Map(topic -> 1), keyDecoder, valueDecoder)(topic).head
 
@@ -35,7 +37,13 @@ class KafkaConsumer[K,V](consumer: ConsumerConnector, topic: String, keyDecoder:
       iterator.next()
     }
 
-  override val onClose: Future[Throwable] = Promise()
+  val closer:Promise[Throwable] = Promise()
 
-  override def close(deadline: Time): Future[Unit] = Future(consumer.shutdown())
+  override val onClose: Future[Throwable] = closer
+
+  override def close(deadline: Time): Future[Unit] = Future {
+    consumer.shutdown()
+    threadPool.shutdown()
+    closer.setValue(new ClosedChannelException)
+  }
 }
