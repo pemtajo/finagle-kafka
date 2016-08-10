@@ -9,7 +9,7 @@ import com.twitter.util.{Future, Promise, Time}
 import kafka.producer.Producer
 import kafka.producer.KeyedMessage
 
-class KafkaProducer[K,V](producer: Producer[K,V])
+class ProducerTransport[K,V](producer: Producer[K,V])
  extends Transport[KeyedMessage[K,V], Unit] {
 
   override def remoteAddress: SocketAddress = new InetSocketAddress(0)
